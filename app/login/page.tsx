@@ -14,23 +14,6 @@ export default function LoginPage() {
   async function login() {
     setError("");
 
-    /* ===== 🔍 4번 문제 확인용 디버그 ===== */
-    console.log("DEBUG ENV CHECK", {
-      NEXT_PUBLIC_GAS_URL: process.env.NEXT_PUBLIC_GAS_URL,
-      NEXT_PUBLIC_GAS_SECRET_KEY: process.env.NEXT_PUBLIC_GAS_SECRET_KEY,
-    });
-
-    if (!process.env.NEXT_PUBLIC_GAS_URL) {
-      alert("❌ NEXT_PUBLIC_GAS_URL 이 브라우저에서 undefined 입니다");
-      return;
-    }
-
-    if (!process.env.NEXT_PUBLIC_GAS_SECRET_KEY) {
-      alert("❌ NEXT_PUBLIC_GAS_SECRET_KEY 이 브라우저에서 undefined 입니다");
-      return;
-    }
-    /* =================================== */
-
     if (!userId || !password) {
       setError("아이디와 비밀번호를 입력하세요.");
       return;
@@ -39,25 +22,13 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(process.env.NEXT_PUBLIC_GAS_URL, {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "login",
-          userId,
-          password,
-          secret: process.env.NEXT_PUBLIC_GAS_SECRET_KEY,
-        }),
+        body: JSON.stringify({ userId, password }),
       });
 
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        throw new Error("GAS 응답이 JSON이 아닙니다");
-      }
-
-      console.log("LOGIN RESPONSE", data);
+      const data = await res.json();
 
       if (!res.ok || !data.success) {
         setError(data?.message || "로그인 실패");
@@ -74,9 +45,8 @@ export default function LoginPage() {
       );
 
       router.push("/");
-    } catch (err: any) {
-      console.error("LOGIN ERROR", err);
-      setError(err?.message || "로그인 중 오류 발생");
+    } catch (err) {
+      setError("서버 통신 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }

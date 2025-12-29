@@ -4,22 +4,24 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 /**
- * 설정값
+ * ===== 설정값 =====
  */
-const TOP_K = 5; // 검색할 문단 개수
+const TOP_K = 5;
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const CHAT_MODEL = "gpt-4.1-mini";
 
+const GAS_URL = process.env.GAS_URL!;
+const GAS_SECRET = process.env.GAS_SECRET_KEY!;
+
 /**
  * OpenAI 클라이언트
- * (API 키는 Vercel 환경변수 OPENAI_API_KEY 사용)
  */
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
 /**
- * 코사인 유사도 계산
+ * 코사인 유사도
  */
 function cosineSimilarity(a: number[], b: number[]) {
   let dot = 0;
@@ -41,17 +43,39 @@ function cosineSimilarity(a: number[], b: number[]) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const question: string = body.question;
+    const { question, userId } = body;
 
-    if (!question || typeof question !== "string") {
+    if (!question || !userId) {
       return NextResponse.json(
-        { error: "question is required" },
+        { error: "question and userId are required" },
         { status: 400 }
       );
     }
 
     /**
-     * 1. 사용자 질문 임베딩 생성
+     * ===== 1️⃣ 계정 상태 / 사용량 확인 =====
+     */
+    const checkRes = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "checkUser",
+        userId,
+        secret: GAS_SECRET,
+      }),
+    });
+
+    const check = await checkRes.json();
+
+    if (!check.success) {
+      return NextResponse.json(
+        { error: check.message },
+        { status: 403 }
+      );
+    }
+
+    /**
+     * ===== 2️⃣ 질문 임베딩 =====
      */
     const queryEmbeddingRes = await client.embeddings.create({
       model: EMBEDDING_MODEL,
@@ -61,7 +85,7 @@ export async function POST(req: Request) {
     const queryEmbedding = queryEmbeddingRes.data[0].embedding;
 
     /**
-     * 2. embeddings.json 로드
+     * ===== 3️⃣ embeddings.json 로드 =====
      */
     const dataPath = path.join(
       process.cwd(),
@@ -73,7 +97,7 @@ export async function POST(req: Request) {
     const documents = JSON.parse(raw);
 
     /**
-     * 3. 유사도 계산
+     * ===== 4️⃣ 유사도 계산 =====
      */
     const scored = documents.map((doc: any) => ({
       ...doc,
@@ -81,11 +105,10 @@ export async function POST(req: Request) {
     }));
 
     scored.sort((a: any, b: any) => b.score - a.score);
-
     const topDocs = scored.slice(0, TOP_K);
 
     /**
-     * 4. GPT에 전달할 컨텍스트 구성
+     * ===== 5️⃣ 컨텍스트 구성 =====
      */
     const context = topDocs
       .map(
@@ -95,7 +118,7 @@ export async function POST(req: Request) {
       .join("\n\n");
 
     /**
-     * 5. GPT 답변 생성
+     * ===== 6️⃣ GPT 호출 =====
      */
     const completion = await client.chat.completions.create({
       model: CHAT_MODEL,
@@ -127,17 +150,58 @@ ${question}
     const answer = completion.choices[0].message.content;
 
     /**
-     * 6. 응답 반환
+     * ===== 7️⃣ 사용량 +1 =====
+     */
+    await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "increaseUsage",
+        userId,
+        secret: GAS_SECRET,
+      }),
+    });
+
+    /**
+     * ===== 8️⃣ 대화 저장 =====
+     */
+    await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "saveChat",
+        userId,
+        role: "user",
+        message: question,
+        secret: GAS_SECRET,
+      }),
+    });
+
+    await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "saveChat",
+        userId,
+        role: "assistant",
+        message: answer,
+        secret: GAS_SECRET,
+      }),
+    });
+
+    /**
+     * ===== 9️⃣ 응답 =====
      */
     return NextResponse.json({
       answer,
+      remaining: check.remaining,
       sources: topDocs.map((d: any) => ({
         id: d.id,
         manual: d.manual,
         section: d.section,
       })),
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error(err);
     return NextResponse.json(
       { error: "internal server error" },

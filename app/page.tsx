@@ -43,21 +43,18 @@ export default function Page() {
   }, []);
 
   /**
-   * 이전 대화 불러오기 (GAS)
+   * 이전 대화 불러오기 (Next API → GAS)
    */
   async function loadPreviousChats(userId: string) {
     try {
-      const res = await fetch(process.env.NEXT_PUBLIC_GAS_URL!, {
+      const res = await fetch("/api/chat/load", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "loadChat",
-          userId,
-          secret: process.env.NEXT_PUBLIC_GAS_SECRET_KEY,
-        }),
+        body: JSON.stringify({ userId }),
       });
 
       const data = await res.json();
+
       if (data.success && Array.isArray(data.chats)) {
         setMessages((prev) => [
           prev[0], // 초기 안내 메시지 유지
@@ -67,8 +64,8 @@ export default function Page() {
           })),
         ]);
       }
-    } catch {
-      // 이전 대화 로드 실패는 치명적이지 않으므로 무시
+    } catch (e) {
+      console.error("이전 대화 로드 실패", e);
     }
   }
 
@@ -138,12 +135,14 @@ export default function Page() {
         <p style={{ opacity: 0.75, marginTop: 6 }}>
           매뉴얼 내용으로만 답변합니다.
         </p>
+
         {remaining !== null && (
           <p style={{ marginTop: 6, fontSize: 14 }}>
             남은 질문 수:{" "}
             <b>{remaining === -1 ? "무제한" : remaining}</b>
           </p>
         )}
+
         {error && (
           <p style={{ color: "red", marginTop: 6 }}>
             {error}

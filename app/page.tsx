@@ -1,140 +1,77 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
-type Msg = { role: "user" | "assistant"; text: string };
+type Chat = { role: string; message: string };
 
-export default function Page() {
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", text: "안녕하세요! 3D 매뉴얼 기반으로만 답변해요. 무엇을 도와드릴까요?" },
-  ]);
+export default function Home() {
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+    const u = localStorage.getItem("user");
+    if (!u) {
+      router.push("/login");
+      return;
+    }
+    setUser(JSON.parse(u));
+    loadChats(JSON.parse(u).userId);
+  }, []);
+
+  async function loadChats(userId: string) {
+    const res = await fetch(process.env.NEXT_PUBLIC_GAS_URL!, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "loadChat",
+        userId,
+        secret: process.env.NEXT_PUBLIC_GAS_SECRET_KEY
+      })
+    });
+    const data = await res.json();
+    if (data.success) setChats(data.chats);
+  }
 
   async function send() {
-    const q = input.trim();
-    if (!q || loading) return;
+    setError("");
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ message: input })
+    });
 
-    setInput("");
-    setMessages((prev) => [...prev, { role: "user", text: q }]);
-    setLoading(true);
+    const data = await res.json();
 
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data?.error || "API error");
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: data?.answer ?? "(응답이 비어 있습니다)" },
-      ]);
-    } catch (e: any) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: `오류: ${e?.message || e}` },
-      ]);
-    } finally {
-      setLoading(false);
+    if (!res.ok) {
+      setError(data.error);
+      return;
     }
+
+    setChats(prev => [
+      ...prev,
+      { role: "user", message: input },
+      { role: "assistant", message: data.reply }
+    ]);
+    setRemaining(data.remaining);
+    setInput("");
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 16 }}>
-      <header style={{ marginBottom: 12 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>3D Manual Chat</h1>
-        <p style={{ opacity: 0.75, marginTop: 6 }}>
-          매뉴얼 내용으로만 답변합니다.
+    <div>
+      <h3>3D Manual AI</h3>
+      {remaining !== null && <p>남은 질문 수: {remaining}</p>}
+      {chats.map((c, i) => (
+        <p key={i}>
+          <b>{c.role}:</b> {c.message}
         </p>
-      </header>
-
-      <section
-        style={{
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          padding: 12,
-          height: "65vh",
-          overflow: "auto",
-          background: "white",
-        }}
-      >
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            style={{
-              display: "flex",
-              justifyContent: m.role === "user" ? "flex-end" : "flex-start",
-              margin: "10px 0",
-            }}
-          >
-            <div
-              style={{
-                maxWidth: "80%",
-                padding: "10px 12px",
-                borderRadius: 12,
-                whiteSpace: "pre-wrap",
-                border: "1px solid rgba(0,0,0,0.10)",
-                background: m.role === "user" ? "rgba(0,0,0,0.04)" : "white",
-              }}
-            >
-              {m.text}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div style={{ opacity: 0.6, padding: "6px 2px" }}>
-            답변 생성 중…
-          </div>
-        )}
-        <div ref={endRef} />
-      </section>
-
-      <footer style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          placeholder="질문을 입력하고 Enter"
-          style={{
-            flex: 1,
-            padding: "12px 12px",
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.2)",
-            outline: "none",
-          }}
-        />
-        <button
-          onClick={send}
-          disabled={loading || !input.trim()}
-          style={{
-            padding: "12px 14px",
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.2)",
-            background: loading ? "rgba(0,0,0,0.06)" : "white",
-            cursor: loading ? "not-allowed" : "pointer",
-            fontWeight: 600,
-          }}
-        >
-          보내기
-        </button>
-      </footer>
-    </main>
+      ))}
+      <input value={input} onChange={e => setInput(e.target.value)} />
+      <button onClick={send}>Send</button>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+    </div>
   );
 }
